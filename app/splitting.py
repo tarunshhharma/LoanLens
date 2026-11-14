@@ -61,6 +61,7 @@ PREAMBLE = "preamble"  # everything before the first clause (title, parties, WHE
 CLAUSE = "clause"      # a numbered clause or sub-clause, e.g. "5" or "5.1"
 SECTION = "section"    # a schedule or annexure at the end of the agreement
 PAGE = "page"          # fallback for UNKNOWN style: one chunk per page
+DEFINITION = "definition"  # one defined term inside clause 1, e.g. "Penal Charges"
 
 # Top-level clause starts, per style. group(1) is the clause number.
 TOP_PATTERNS = {
@@ -83,14 +84,24 @@ SECTION_PATTERN = re.compile(r"(SCHEDULE|ANNEXURE)\b|(Schedule|Annexure)[\s-]+[A
 MAX_SECTION_LEN = 60   # section titles are short lines
 MAX_HEADING_LEN = 80   # top-level clause headings are short lines
 
+# Definitions. Quotes may be straight (") or curly (“ ”). group(1) is the term.
+# Listed: a letter or number, a dot, then a quoted term. "means" may be on the next line.
+#   'a. “Agreement” means ...' (AU home)    '1. “Agreement”' (RBL)
+LISTED_DEFINITION_PATTERN = re.compile(r'(?:[A-Za-z]|\d{1,2})\.\s+["“]([^"”]+)')
+# Bare: a quoted term, then "means" / "shall mean" within 40 characters on the SAME line.
+#   '"Loan" means ...'    '"EMI" or "Equated Monthly Installment" shall mean ...' (AU personal)
+# Does NOT match '"Borrower" shall include ...' -- that mentions a term, it doesn't define it.
+BARE_DEFINITION_PATTERN = re.compile(r'["“]([^"”]+)["”][^.]{0,40}?\b(?:means|shall mean)\b')
+
 
 @dataclass
 class Chunk:
-    kind: str                 # PREAMBLE, CLAUSE, SECTION or PAGE
+    kind: str                 # PREAMBLE, CLAUSE, SECTION, PAGE or DEFINITION
     number: str | None        # clause number like "5.1"; None for other kinds
     page_start: int           # 1-based page where the chunk starts
     page_end: int             # 1-based page where the chunk ends
     lines: list[str] = field(default_factory=list)
+    term: str | None = None   # the defined term, only for DEFINITION chunks
 
     @property
     def text(self) -> str:
@@ -106,6 +117,26 @@ def _is_heading(line: str) -> bool:
     return len(line) <= MAX_HEADING_LEN and not line.endswith((";", ","))
 
 
+def _match_definition(line: str) -> str | None:
+    """Return the defined term if the line starts a definition, else None.
+
+    Try LISTED_DEFINITION_PATTERN first, then BARE_DEFINITION_PATTERN.
+    Return the term (group 1) with surrounding whitespace stripped.
+        'a. “Agreement” means this Agreement'   -> "Agreement"
+        '"Loan Account" shall mean the account' -> "Loan Account"
+        '"Borrower" shall include his heirs'    -> None
+    """
+    m = LISTED_DEFINITION_PATTERN.match(line)
+
+    if m:
+        return m.group(1).strip()
+    
+    m = BARE_DEFINITION_PATTERN.match(line)
+
+    if m:
+        return m.group(1).strip()
+
+    return None
 
 def split_into_chunks(pages: list[str]) -> list[Chunk]:
     """Split a cleaned document into preamble, clause and section chunks.
@@ -134,6 +165,10 @@ def split_into_chunks(pages: list[str]) -> list[Chunk]:
         3. SUB-clause: SUB_PATTERNS[style] matches, AND the first part of its number
            equals last_top ("5.1" only counts while inside clause 5)
            -> start a new CLAUSE chunk with that number.
+        3b. DEFINITION: only while inside top-level clause 1 (last_top == 1; all three
+           sample agreements put their definitions there), if _match_definition(line)
+           returns a term -> start a new DEFINITION chunk: number None, term set.
+           Checked AFTER rule 3, so "1.1.1 In case..." is still a sub-clause.
         4. Otherwise the line continues the current chunk: append it and update the
            chunk's page_end. If there is no current chunk yet, start a PREAMBLE chunk.
 
@@ -173,6 +208,10 @@ def split_into_chunks(pages: list[str]) -> list[Chunk]:
                     sub = SUB_PATTERNS[style].match(line)
                     if sub and sub.group(1).split(".")[0] == str(last_top):
                         new_chunk = Chunk(CLAUSE, sub.group(1), page_number, page_number, [line])
+                    
+                    # Rule 3b: definition, only inside clause 1
+                    elif last_top == 1 and (term:= _match_definition(line)):
+                        new_chunk = Chunk(DEFINITION, None, page_number, page_number, [line], term=term)
 
             if new_chunk:
                 chunks.append(new_chunk)

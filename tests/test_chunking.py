@@ -59,7 +59,7 @@ PLAIN_DOC = [
         "IT IS AGREED BY AND BETWEEN THE PARTIES AS FOLLOWS",
         "1 Definitions and Interpretation",
         "1.1 Definitions",
-        '"Agreement" means this personal loan agreement.',
+        "In this Agreement, the following words have these meanings:",
         "1.2 Interpretation",
     ]),
     "\n".join([
@@ -97,7 +97,7 @@ def test_preamble_holds_lines_before_first_clause():
 
 def test_chunk_starts_with_the_line_that_started_it():
     clause = _find(split_into_chunks(PLAIN_DOC), "1.1")
-    assert clause.text == '1.1 Definitions\n"Agreement" means this personal loan agreement.'
+    assert clause.text == "1.1 Definitions\nIn this Agreement, the following words have these meanings:"
 
 
 def test_clause_spanning_two_pages():

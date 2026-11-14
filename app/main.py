@@ -1,5 +1,7 @@
 import pymupdf  
 from fastapi import FastAPI, HTTPException, UploadFile
+from app.cleaning import clean_pages
+from app.splitting import UNKNOWN, detect_numbering_style, split_into_chunks
 
 app = FastAPI(
   title= "LoanLens API",
@@ -32,9 +34,11 @@ def upload_pdf(file: UploadFile):
 
   # 3. Extract text page by page, keeping track of page numbers
   pages = []
+  page_texts = []
   with doc:
     for page in doc:
       text = page.get_text()
+      page_texts.append(text)
       char_count = len(text.strip())
       pages.append({
         "page_number": page.number +1, # PyMuPDF counts from 0, so we add 1 to make it human-readable
@@ -54,11 +58,29 @@ def upload_pdf(file: UploadFile):
   if empty_pages:
     warnings.append(f"Pages {empty_pages} have no extractable text (possibly scanned).")
 
+  cleaned = clean_pages(page_texts)
+  style = detect_numbering_style(cleaned)
+  chunk = split_into_chunks(cleaned)
 
+  if style == UNKNOWN:
+    warnings.append("Could not detect clause numbering; the document was split by page instead.")
 
   return {
     "filename": file.filename,
     "total_pages": len(pages),
     "pages": pages,
-    "warnings": warnings
+    "warnings": warnings,
+    "numbering_style": style,
+    "chunk_count": len(chunks),
+    "chunks": [
+      {
+        "kind": c.kind,
+        "number": c.number,
+        "term": c.term,
+        "page_start": c.page_start,
+        "page_end": c.page_end,
+        "text": c.text,
+    }
+    for c in chunks
+    ]
   }
