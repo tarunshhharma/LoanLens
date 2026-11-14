@@ -6,7 +6,6 @@ Run from the project root:
 
 from app.cleaning import clean_pages
 
-
 # --- Rule 1: whitespace -------------------------------------------------------
 
 def test_collapses_runs_of_spaces():

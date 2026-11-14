@@ -5,8 +5,8 @@ extra spaces, blank lines, stray "." lines, page numbers, and headers or
 footers that repeat on most pages.
 """
 
-import re
 import collections
+import re
 
 # A line that appears on at least this fraction of pages is treated as a header/footer.
 HEADER_PAGE_RATIO = 0.5

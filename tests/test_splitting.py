@@ -6,7 +6,6 @@ Run from the project root:
 
 from app.splitting import ARTICLE, DOTTED, PLAIN, UNKNOWN, detect_numbering_style
 
-
 # --- detect_numbering_style ---------------------------------------------------
 
 def test_detects_plain_style():

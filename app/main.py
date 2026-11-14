@@ -1,5 +1,6 @@
-import pymupdf  
+import pymupdf
 from fastapi import FastAPI, HTTPException, UploadFile
+
 from app.cleaning import clean_pages
 from app.splitting import UNKNOWN, detect_numbering_style, split_into_chunks
 
@@ -60,7 +61,7 @@ def upload_pdf(file: UploadFile):
 
   cleaned = clean_pages(page_texts)
   style = detect_numbering_style(cleaned)
-  chunk = split_into_chunks(cleaned)
+  chunks = split_into_chunks(cleaned)
 
   if style == UNKNOWN:
     warnings.append("Could not detect clause numbering; the document was split by page instead.")
