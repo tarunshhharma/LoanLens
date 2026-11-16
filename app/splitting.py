@@ -102,6 +102,9 @@ class Chunk:
     page_end: int             # 1-based page where the chunk ends
     lines: list[str] = field(default_factory=list)
     term: str | None = None   # the defined term, only for DEFINITION chunks
+    line_pages: list[int] = field(default_factory=list)  # page of each line; same length as lines
+    part: int | None = None   # 1, 2, 3... if a long chunk was split by split_oversized
+    title: str | None = None  # SECTION title line, e.g. "Annexure B"; kept by every part
 
     @property
     def text(self) -> str:
@@ -177,7 +180,8 @@ def split_into_chunks(pages: list[str]) -> list[Chunk]:
     style = detect_numbering_style(pages)
     if style == UNKNOWN:
         return [
-            Chunk(PAGE, None, page_number, page_number, page.splitlines())
+            Chunk(PAGE, None, page_number, page_number, page.splitlines(),
+                  line_pages=[page_number] * len(page.splitlines()))
             for page_number, page in enumerate(pages, start=1)
             if page
         ]
@@ -194,24 +198,28 @@ def split_into_chunks(pages: list[str]) -> list[Chunk]:
             # Rule 1: schedule / annexure
             if len(line) <= MAX_SECTION_LEN and SECTION_PATTERN.match(line):
                 in_sections = True
-                new_chunk = Chunk(SECTION, None, page_number, page_number, [line])
+                new_chunk = Chunk(SECTION, None, page_number, page_number, [line],
+                                  line_pages=[page_number], title=line)
             
             elif not in_sections:
                 # Rule 2: top-level clause ("5 Interest", "5. INTEREST", "ARTICLE 5")
                 top = TOP_PATTERNS[style].match(line)
                 if top and last_top + 1 <= int(top.group(1)) <= last_top + 2 and _is_heading(line):
                     last_top = int(top.group(1))
-                    new_chunk = Chunk(CLAUSE, top.group(1), page_number, page_number, [line])
+                    new_chunk = Chunk(CLAUSE, top.group(1), page_number, page_number, [line],
+                                      line_pages=[page_number])
                 
                 # Rule 3: sub-clause ("5.1"), only inside the current top-level clause
                 else:
                     sub = SUB_PATTERNS[style].match(line)
                     if sub and sub.group(1).split(".")[0] == str(last_top):
-                        new_chunk = Chunk(CLAUSE, sub.group(1), page_number, page_number, [line])
+                        new_chunk = Chunk(CLAUSE, sub.group(1), page_number, page_number, [line],
+                                          line_pages=[page_number])
                     
                     # Rule 3b: definition, only inside clause 1
                     elif last_top == 1 and (term:= _match_definition(line)):
-                        new_chunk = Chunk(DEFINITION, None, page_number, page_number, [line], term=term)
+                        new_chunk = Chunk(DEFINITION, None, page_number, page_number, [line],
+                                          term=term, line_pages=[page_number])
 
             if new_chunk:
                 chunks.append(new_chunk)
@@ -223,6 +231,50 @@ def split_into_chunks(pages: list[str]) -> list[Chunk]:
                 current = Chunk(PREAMBLE, None, page_number, page_number, [])
                 chunks.append(current)
             current.lines.append(line)
+            current.line_pages.append(page_number)
             current.page_end = page_number
 
     return chunks
+
+
+# =============================================================================
+# Step 4: break oversized chunks into parts (Day 2, before embedding)
+# =============================================================================
+
+MAX_CHUNK_CHARS = 4000  # ~1,000 tokens: well under the embedding limit, tight citations
+
+
+def _make_part(chunk: Chunk, lines: list[str], pages: list[int], part: int) -> Chunk:
+    return Chunk(chunk.kind, chunk.number, pages[0], pages[-1], lines,
+                 term=chunk.term, line_pages=pages, part=part, title=chunk.title)
+
+
+def split_oversized(chunks: list[Chunk], max_chars: int = MAX_CHUNK_CHARS) -> list[Chunk]:
+    """Break chunks whose text is longer than max_chars into parts, at line boundaries.
+
+    - A chunk with len(chunk.text) <= max_chars is returned unchanged.
+    - Otherwise lines are added to a part until the next line would push the part's
+      text over max_chars; then the part is closed and a new one started.
+      A single line longer than max_chars goes into a part on its own (lines are never cut).
+    - Each part keeps kind, number, term and title, gets part = 1, 2, 3..., and its own pages.
+    - Output keeps document order.
+    """
+    result = []
+    for chunk in chunks:
+        if len(chunk.text) <= max_chars:
+            result.append(chunk)
+            continue
+
+        parts = []
+        part_lines, part_pages = [], []
+        for line, page in zip(chunk.lines, chunk.line_pages):
+            # "part_lines and": an empty part always accepts the line, even a too-long one
+            if part_lines and len("\n".join(part_lines + [line])) > max_chars:
+                parts.append(_make_part(chunk, part_lines, part_pages, len(parts) + 1))
+                part_lines, part_pages = [], []
+            part_lines.append(line)
+            part_pages.append(page)
+        parts.append(_make_part(chunk, part_lines, part_pages, len(parts) + 1))  # the last part
+
+        result.extend(parts)
+    return result
