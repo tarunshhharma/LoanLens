@@ -7,6 +7,7 @@ citation can be missing, but it can never be invented.
 
 import json
 from collections.abc import Callable
+
 from app.splitting import CLAUSE, DEFINITION, PAGE, PREAMBLE, SECTION
 
 NOT_FOUND = "Not found in the agreement."

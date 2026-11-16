@@ -7,7 +7,9 @@ rankings without having to compare their scores, which are on different scales.
 
 import re
 from collections import defaultdict
+
 from rank_bm25 import BM25Okapi
+
 from app.store import Embedder, get_document_chunks, vector_search
 
 RRF_K = 60                # standard constant from the RRF paper; dampens the gap between ranks

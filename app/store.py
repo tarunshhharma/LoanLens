@@ -5,7 +5,9 @@ doc_id, so searches are filtered to the document being asked about.
 """
 
 from collections.abc import Callable
+
 import chromadb
+
 from app.splitting import Chunk
 
 COLLECTION_NAME = "chunks"

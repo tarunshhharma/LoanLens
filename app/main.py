@@ -1,8 +1,25 @@
-import pymupdf
-from fastapi import FastAPI, HTTPException, UploadFile
+import hashlib
+from functools import lru_cache
 
+import openai
+import pymupdf
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, UploadFile
+from pydantic import BaseModel, Field
+
+from app.answer import answer_question
 from app.cleaning import clean_pages
-from app.splitting import UNKNOWN, detect_numbering_style, split_into_chunks
+from app.llm import complete_json, embed_texts
+from app.retrieval import hybrid_search
+from app.splitting import (
+  UNKNOWN,
+  detect_numbering_style,
+  split_into_chunks,
+  split_oversized,
+)
+from app.store import add_document, get_collection
+
+load_dotenv()  # puts OPENAI_API_KEY (and OPENAI_CHAT_MODEL, if set) from .env into os.environ
 
 app = FastAPI(
   title= "LoanLens API",
@@ -12,6 +29,13 @@ app = FastAPI(
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 MIN_CHARS_PER_PAGE = 30
+TOP_K = 5  # chunks sent to the model per question
+
+
+@lru_cache(maxsize=1)
+def collection():
+  # Opened once, on first request, then reused.
+  return get_collection()
 
 
 @app.post("/upload")
@@ -59,14 +83,23 @@ def upload_pdf(file: UploadFile):
   if empty_pages:
     warnings.append(f"Pages {empty_pages} have no extractable text (possibly scanned).")
 
+  # 4. Clean, split into clauses, then break oversized chunks into parts
   cleaned = clean_pages(page_texts)
   style = detect_numbering_style(cleaned)
-  chunks = split_into_chunks(cleaned)
+  chunks = split_oversized(split_into_chunks(cleaned))
 
   if style == UNKNOWN:
     warnings.append("Could not detect clause numbering; the document was split by page instead.")
 
+  # 5. Embed and store. Same file bytes -> same doc_id, so a re-upload replaces, not duplicates.
+  doc_id = hashlib.sha256(pdf_bytes).hexdigest()[:16]
+  try:
+    add_document(collection(), doc_id, file.filename, chunks, embed_texts)
+  except openai.OpenAIError:
+    raise HTTPException(status_code=502, detail="The embedding service failed. Try again later.")
+
   return {
+    "doc_id": doc_id,
     "filename": file.filename,
     "total_pages": len(pages),
     "pages": pages,
@@ -78,6 +111,7 @@ def upload_pdf(file: UploadFile):
         "kind": c.kind,
         "number": c.number,
         "term": c.term,
+        "part": c.part,
         "page_start": c.page_start,
         "page_end": c.page_end,
         "text": c.text,
@@ -85,3 +119,21 @@ def upload_pdf(file: UploadFile):
     for c in chunks
     ]
   }
+
+
+class AskRequest(BaseModel):
+  doc_id: str
+  question: str = Field(min_length=3, max_length=1000)
+
+
+@app.post("/ask")
+def ask(request: AskRequest):
+  try:
+    chunks = hybrid_search(collection(), request.doc_id, request.question, embed_texts, TOP_K)
+    if not chunks:
+      raise HTTPException(status_code=404, detail="Unknown doc_id. Upload the PDF first.")
+    result = answer_question(request.question, chunks, complete_json)
+  except openai.OpenAIError:
+    raise HTTPException(status_code=502, detail="The language model service failed. Try again later.")
+
+  return {"doc_id": request.doc_id, "question": request.question, **result}

@@ -22,11 +22,13 @@ Format: what was decided, why, and what else was considered.
 
 - **Why:** Cheap checks run before expensive ones. MuPDF is a C library, so huge or malformed input can exhaust memory or crash the parser. Size and type checks keep untrusted input away from it.
 
-### 4. Status codes: 400 vs 413 vs 422
+### 4. Status codes: 400 vs 413 vs 422 vs 404 vs 502
 
 - **400 Bad Request:** the file is not a PDF, or it is corrupted.
 - **413 Payload Too Large:** over the size limit.
-- **422 Unprocessable Content:** a valid PDF with no usable text (e.g. fully scanned). The request is fine; the content can't be processed.
+- **422 Unprocessable Content:** a valid PDF with no usable text (e.g. fully scanned). The request is fine; the content can't be processed. FastAPI also returns 422 by itself when the `/ask` body fails validation (e.g. a question under 3 characters).
+- **404 Not Found:** `/ask` with a `doc_id` that was never uploaded.
+- **502 Bad Gateway:** OpenAI failed. The fault is in a service behind us, not in the client's request.
 
 ### 5. Text detection is per page, not per document
 
@@ -125,6 +127,79 @@ Format: what was decided, why, and what else was considered.
 
 ---
 
+## Storage & embeddings (Day 2)
+
+### 19. Oversized chunks are split into parts before embedding
+
+- **Decision:** A chunk over 4,000 characters (about 1,000 tokens) is split into parts at line boundaries. Each part keeps its `kind`, `number`, `term` and section `title`, and gets `part = 1, 2, 3...`.
+- **Why:** the embedding API rejects inputs over ~8,191 tokens, and AU home's Annexure B is ~71,000 characters. Even below the limit, one vector for 27 pages is too vague to retrieve and cites "pages 49-75".
+- **Why 4,000 and not ~30,000:** smaller parts give sharper vectors and tighter page citations. The cost is less context per hit.
+- **Each part gets its own pages:** the splitter now records the page of every line (`line_pages`), so part 4 of clause 7 cites pages 18-19, not 13-24.
+- **The section title is stored, not read from the first line:** part 2 of a schedule starts mid-sentence. The first real run cited "The Bank may, in its sole discretion... (part 2)" until this was fixed.
+
+### 20. OpenAI `text-embedding-3-small` for embeddings; all OpenAI calls in one file
+
+- **Decision:** `app/llm.py` is the only module that imports `openai`. Other modules receive `embed` / `complete` as function arguments.
+- **Why OpenAI:** one provider for embeddings and answers, no PyTorch install, good quality, cost of a few paise per agreement.
+- **Alternative:** a local `sentence-transformers` model. Free, offline, and the agreement text never leaves the machine. Worth switching to if banks require on-premise processing.
+- **Why one file (dependency injection):** tests pass a 3-line fake instead of the real function, so pytest needs no key, costs nothing, and never fails because of the network.
+- **The client is created lazily** (`@lru_cache` on `_client()`), so importing the app never needs a key.
+
+### 21. One Chroma collection, filtered by `doc_id`
+
+- **Decision:** every document's chunks go into one persistent collection (`chroma_db/`, gitignored). Each chunk's metadata holds its `doc_id`, and every query filters on it.
+- **Why:** a question about one agreement can never retrieve another agreement's clause. A collection per document would also work but multiplies collections.
+- **Cosine distance:** compares direction, not length, so a short question and a long clause on the same topic still match.
+- **`embedding_function=None`:** we supply the vectors, so Chroma must not download and run its own model.
+- **Chunk IDs are `"{doc_id}:{index}"`:** IDs must be unique across the whole collection, not just one document.
+- **`None` is left out of metadata:** Chroma rejects `None` values (`TypeError: Cannot convert Python object to MetadataValue`).
+
+### 22. `doc_id` is a hash of the file; uploading again replaces
+
+- **Decision:** `doc_id = sha256(file bytes)[:16]`. `add_document` deletes the document's existing chunks before adding.
+- **Why the hash:** the same file always gets the same ID, and two different files named `agreement.pdf` never collide. 16 hex characters = 64 bits.
+- **Why delete first:** tested on Chroma 1.5: `add` with an existing ID **silently keeps the old data**. After a change to the splitter, a re-upload would keep stale chunks, and leftover IDs from a longer old split would stay searchable.
+
+### 23. One file per upload request
+
+- **Decision:** `/upload` takes a single `UploadFile`, not a list.
+- **Why:** a bad file fails its own request with a clear status code, with no partial-success response to design. The 20 MB limit stays per file. Clients can still send several requests in parallel; sync endpoints run in the thread pool.
+
+---
+
+## Retrieval & answering (Day 2)
+
+### 24. Hybrid retrieval: BM25 + vector search
+
+- **Decision:** each question runs both a BM25 keyword search (`rank_bm25`) and a vector search, 20 candidates each.
+- **Why both:** vectors find meaning ("cost of paying late" -> Penal Charges). BM25 finds exact words that embeddings blur: "MCLR", "foreclosure", "clause 2.1".
+- **The tokenizer keeps dotted numbers whole:** `\w+(?:\.\w+)*` makes "5.1" one token, so "clause 5.1" matches clause 5.1 and not every chunk containing a 5.
+- **Zero-score chunks are dropped:** a chunk sharing no word with the question would otherwise still earn RRF points.
+- **BM25 is rebuilt from Chroma on every question:** BM25 needs every chunk of the document to compute word rarity; `vector_search` only returns the top 20 by meaning. Rebuilding takes milliseconds for one agreement and can never go out of sync with the store.
+
+### 25. Reciprocal Rank Fusion, written by hand
+
+- **Decision:** score = sum of `1 / (60 + rank)` over the rankings a chunk appears in. The top 5 go to the model.
+- **Why ranks, not scores:** BM25 scores (0 to 15+) and cosine distances (0 to 2) are on different scales and can't be added. Ranks always are.
+- **Why k = 60:** it dampens the gap between ranks, so a chunk ranked 3rd in both lists (2/63 = 0.032) beats one ranked 1st in only one (1/61 = 0.016). Agreement between two methods is strong evidence. With k = 0, a single first place would dominate.
+- **Vector ranking is passed first:** it only matters for exact ties, which go to the item seen first. For plain-English questions, meaning is usually the better signal.
+- **Why by hand:** it is ten lines, fully tested, and explainable. A framework would hide it.
+
+### 26. The model picks source numbers; citations come from our metadata
+
+- **Decision:** the prompt lists sources as `[1] Clause 5.1, page 7` + text. The model replies with JSON `{"answer": ..., "sources": [1, 3]}`. Labels and page numbers in the response are built from stored metadata.
+- **Why:** a model that writes "page 7" can hallucinate "page 9". A model that picks `[1]` can only pick a chunk we sent. A citation can be missing, but never invented.
+- **Why numbers, not chunk IDs, in the prompt:** `[3]` is copied back reliably; a 19-character random ID can be mistyped and then can't be looked up.
+
+### 27. Model output is validated like user input
+
+- **Decision:** `parse_reply` keeps only integer source numbers between 1 and the number of sources, once each. Strings (`"1"`) and booleans (`true`, which Python treats as 1) are rejected. Invalid JSON, or JSON that isn't an object, means "not found".
+- **An answer with no valid source is "not found":** every answer must be traceable to the agreement. Showing nothing is safer than an unverifiable figure in a legal document.
+- **No retrieved chunks means no model call:** saves cost and removes the chance of an answer from the model's general knowledge.
+- **`temperature=0` and JSON mode:** the same question gives the same answer, and the reply always parses. The model is `gpt-4.1-mini` by default (cheap, non-reasoning), overridable with `OPENAI_CHAT_MODEL` in `.env`.
+
+---
+
 ## Known limitations
 
 | Limitation | Example | Possible fix |
@@ -133,7 +208,12 @@ Format: what was decided, why, and what else was considered.
 | Garbled text passes the text check | Broken font encoding (SBI specimen) | Check text quality, not only length |
 | Mixed numbering styles produce one preamble chunk | `1.` top-level with `1.1` sub-clauses (`tests/fixtures/text.pdf`) | Fall back to page chunks when no clauses are found |
 | Some sub-clause forms are missed | `12. 1. Appointment...` (space inside the number, AU home) | Extend the sub-clause patterns |
-| Very long clauses | AU home clause 7 is about 44,000 characters | Split oversized chunks before embedding, keeping the clause number |
+| Parts of a split clause lose their heading | Part 3 of AU home clause 7 doesn't contain the words of clause 7's heading | Prefix each part's embedded text with its clause number and heading |
 | Wrapped definition terms are cut short | RBL `"Equated Monthly` / `Installments (EMIs)"` gets the label "Equated Monthly" | Join lines until the closing quote |
 | Only three numbering styles | A new bank's format is UNKNOWN | Page fallback already works; add styles as they are found |
-| `/upload` has no endpoint tests | Bugs in `main.py` aren't caught by pytest | `TestClient` tests (Day 5) |
+| Retrieval quality is not measured | The prepayment answer cited only the 3-day cooling-off clause; foreclosure charges may have been missed | Hand-written question → expected-clause cases (planned) |
+| No reranker | The top 5 come straight from RRF | Cross-encoder reranker (planned extra) |
+| BM25 is rebuilt on every question | Fine for one agreement; slow for very large documents or many concurrent users | Cache the index per `doc_id` |
+| Agreement text is sent to OpenAI | Not acceptable for banks requiring on-premise processing | Local embedding and chat models |
+| Chroma runs inside the API process | Several uvicorn workers would each open the same files | Run Chroma as a separate server |
+| `/upload` and `/ask` have no endpoint tests | Bugs in `main.py` aren't caught by pytest | `TestClient` tests (Day 5; needs `httpx2`) |
