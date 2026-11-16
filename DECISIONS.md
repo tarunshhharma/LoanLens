@@ -27,7 +27,7 @@ Format: what was decided, why, and what else was considered.
 - **400 Bad Request:** the file is not a PDF, or it is corrupted.
 - **413 Payload Too Large:** over the size limit.
 - **422 Unprocessable Content:** a valid PDF with no usable text (e.g. fully scanned). The request is fine; the content can't be processed. FastAPI also returns 422 by itself when the `/ask` body fails validation (e.g. a question under 3 characters).
-- **404 Not Found:** `/ask` with a `doc_id` that was never uploaded.
+- **404 Not Found:** `/ask` or `/extract` with a `doc_id` that was never uploaded.
 - **502 Bad Gateway:** OpenAI failed. The fault is in a service behind us, not in the client's request.
 
 ### 5. Text detection is per page, not per document
@@ -200,6 +200,86 @@ Format: what was decided, why, and what else was considered.
 
 ---
 
+## Extraction & risk flags (Day 3)
+
+### 28. `LoanTerms`: every value carries its citation
+
+- **Decision:** each field is a `Term[T]` (a generic Pydantic model of `value` + `citation`) or `None`. Ten fields: amount, rate, rate type, tenure, EMI, processing fee, whether a prepayment charge applies, prepayment charges, penal charges, whether the bank can change the rate.
+- **Why a generic `Term[T]`:** every field has the same shape with a different value type. Pydantic refuses to build a `Term` without a citation, so "no value without a source" is enforced by the type, not by convention.
+- **`None` means "not stated":** the sample agreements are templates with blank amounts. A missing value is a normal answer; a wrong value is a validation error. The two must never look the same.
+
+### 29. The schema is strict on purpose
+
+- **`extra="forbid"`:** an unknown key (`"loan_amout"`, `"confidence"`) is an error. Pydantic's default silently drops it, and a dropped amount would look exactly like "the agreement states no amount" (schema drift).
+- **Sanity ranges, not business rules:** rate above 0 and at most 50% per annum, tenure 1-480 months, amounts above 0. A 0% or 60% home loan means the model misread something; rejecting it beats flagging a fake risk.
+- **Numbers for what code compares, text for what people read:** amount, rate, tenure and EMI are numbers because risk rules compute on them. Fees and charges come in too many shapes (`1% + GST`, `Rs 0.65 per Rs 1,000 per day`, `Nil`), so they are short text shown with their citation. `prepayment_charge_applies` is a separate bool so a rule can test it without parsing text.
+- **Plain numbers only:** the prompt asks for `500000`, and the schema rejects `"5,00,000"`. The prompt is a request; the schema is the guarantee. No hand-written parser for Indian number formats.
+
+### 30. Extraction runs one search and one model call per field group
+
+- **Decision:** three groups (amount/rate/tenure/EMI, charges, rate changes), each with its own search query and the top 8 chunks.
+- **Why groups:** related terms sit in the same part of an agreement (the schedule, the schedule of charges). 3 calls instead of 10, and each prompt carries only chunks relevant to its fields. One call for everything would need far more chunks in one prompt.
+- **Why 8 chunks, not 5:** one call must cover several fields.
+- **Same citation rule as `/ask`:** the model returns `{"value", "source"}` per field; the citation is built from chunk metadata.
+- **`extract_terms` receives a `search` function:** it never sees Chroma or the `doc_id`. Tests pass `lambda q: CHUNKS`; a future reranker changes `main.py`, not `extract.py`.
+
+### 31. Two validation passes, one field at a time
+
+- **Pass 1, provenance (`parse_extraction`):** valid JSON object, a real integer source number. Same checks as decision 27.
+- **Pass 2, content (`validate_terms`):** each field is validated against `LoanTerms` on its own.
+- **Why one field at a time:** a misread rate drops the rate, not all ten terms. The warning names the field and shows exactly what the model sent (`got 60`).
+- **`null`, and `{"value": null, "source": 3}`, mean "not stated", not a warning:** found on AU home's blank template, which produced five noise warnings before the fix. Warnings must mean something went wrong, or users learn to ignore them.
+
+### 32. Risk flags come from plain-Python rules, not the LLM
+
+- **Decision:** five rules, each a function `LoanTerms -> RiskFlag | None`, listed in `RULES`. Adding a rule is one function and one line.
+- **Why not ask the model for risks:** the same agreement must get the same flags every run; each rule is unit-tested; every flag is explainable ("19.25 > 18"); and a rule can only fire on terms that were extracted with citations. The LLM reads; the code judges.
+- **Missing data never raises a flag:** rules check `is not True` / `is None` first. `not x` would treat "unknown" as "no".
+- **Every flag carries the citations of the terms that triggered it,** de-duplicated, so the user can check the clause.
+
+### 33. The individual rules
+
+| Rule | Severity | Fires when |
+|---|---|---|
+| `floating_rate_prepayment_charge` | high | floating rate + a prepayment charge applies |
+| `bank_can_change_rate` | high if the rate is called fixed, else medium | the bank may change the rate |
+| `high_interest_rate` | medium | rate above `HIGH_RATE_PERCENT` (18%) |
+| `emi_mismatch` | medium | stated EMI differs from the reducing-balance formula by more than 5% |
+| `prepayment_charge` | low | a prepayment charge applies and the rate isn't floating |
+
+- **18% is a product choice, not a law:** a named constant, and the right value differs by loan type.
+- **EMI formula:** `P * r * (1+r)^n / ((1+r)^n - 1)`, `r` = monthly rate. Rs 5 lakh at 10.5% for 240 months = Rs 4,991.9. A mismatch means a misread term or something else inside the EMI.
+- **The RBI rule says "check whether this applies":** the tool flags for a human to verify; it does not give legal advice.
+- **A "fixed" rate the bank can change is high:** the borrower chose fixed for certainty and the contract contradicts its own label. Found for real in AU personal (Schedule A vs clause 7.2).
+
+### 34. `/extract` checks the document exists first
+
+- **Decision:** an explicit existence check (`collection.get(..., limit=1, include=[])`) returns 404 before any model call.
+- **Why:** without it, every search returns nothing and the response is a 200 with all fields `None`, as if the agreement stated no terms. A silent wrong answer.
+- **Response:** `found` (field names), `terms` (plain dicts via `model_dump`), `risk_flags` (most severe first), `warnings`.
+
+---
+
+## UI (Day 3)
+
+### 35. Streamlit as a thin client over the API
+
+- **Decision:** `ui/app.py` only talks HTTP to `/upload`, `/ask` and `/extract`. It never imports `app.*`.
+- **Why:** the API stays the product. The UI could be replaced (React) without touching `app/`, and the two can run as separate containers.
+- **`st.session_state`:** Streamlit reruns the whole script on every click, so the document, answer history and extraction live in session state.
+- **An explicit "Upload and index" button:** otherwise every rerun would upload and re-embed the PDF still held by the file picker.
+- **Every failure is shown on the page:** API not running, timeout, 404, 422, 502. `TIMEOUT = 180` because httpx's 5-second default is shorter than embedding a 75-page agreement.
+- **Formatting lives in `ui/display.py`** (Indian digit grouping `1,23,45,678`, tenure in years, Yes/No) so it can be unit-tested; Streamlit pages themselves are hard to test.
+- **Run with `python -m streamlit run ui/app.py`:** `python -m` puts the project folder on the import path, so `from ui.display import ...` works.
+
+### 36. Endpoint tests call the function directly, with `monkeypatch`
+
+- **Decision:** `/extract` tests call `main.extract(...)` and use `monkeypatch.setattr(main, ...)` to swap in a fake model, a fake embedder and a Chroma in a temp folder.
+- **Why:** `TestClient` needs `httpx2`, not installed yet. This still covers the endpoint's logic (404, 502, response shape, risk flags) and never touches the real `chroma_db/`.
+- **Why it works:** `extract()` looks up `complete_json` and `embed_texts` in `main`'s globals when it runs, so replacing them in `main` changes what it calls.
+
+---
+
 ## Known limitations
 
 | Limitation | Example | Possible fix |
@@ -216,4 +296,10 @@ Format: what was decided, why, and what else was considered.
 | BM25 is rebuilt on every question | Fine for one agreement; slow for very large documents or many concurrent users | Cache the index per `doc_id` |
 | Agreement text is sent to OpenAI | Not acceptable for banks requiring on-premise processing | Local embedding and chat models |
 | Chroma runs inside the API process | Several uvicorn workers would each open the same files | Run Chroma as a separate server |
-| `/upload` and `/ask` have no endpoint tests | Bugs in `main.py` aren't caught by pytest | `TestClient` tests (Day 5; needs `httpx2`) |
+| `/upload` and `/ask` have no endpoint tests | Bugs in `main.py` aren't caught by pytest (`/extract` has them, via `monkeypatch`) | `TestClient` tests (Day 5; needs `httpx2`) |
+| The model sometimes cites a source that doesn't exist | AU home `penal_charges` was found in one run and dropped ("cited no valid source") in the next | Retry once with the validation error in the prompt (planned "go deeper") |
+| Extraction varies between runs | Same agreement, different fields found, even at `temperature=0` | Retry on failure; measure with an eval set (Day 4) |
+| Only ten terms, five rules | No insurance, collateral or guarantor terms; no cross-default rule | Add fields and rules as needed; each rule is one function |
+| Risk thresholds are not per loan type | 18% is high for a home loan, normal for some personal loans | Thresholds per loan type |
+| The UI's upload button isn't tested automatically | Streamlit's `AppTest` can't drive the file picker | Manual check; Playwright browser tests if needed |
+| Chunks stored before a splitter change keep old metadata | AU home citations said "Section (part 1)" until re-uploaded | Re-upload, or store a pipeline version and re-index on change |
