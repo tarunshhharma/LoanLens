@@ -9,8 +9,10 @@ from pydantic import BaseModel, Field
 
 from app.answer import answer_question
 from app.cleaning import clean_pages
+from app.extract import TOP_K_EXTRACT, extract_terms
 from app.llm import complete_json, embed_texts
 from app.retrieval import hybrid_search
+from app.risk import assess_risks
 from app.splitting import (
   UNKNOWN,
   detect_numbering_style,
@@ -137,3 +139,32 @@ def ask(request: AskRequest):
     raise HTTPException(status_code=502, detail="The language model service failed. Try again later.")
 
   return {"doc_id": request.doc_id, "question": request.question, **result}
+
+
+class ExtractRequest(BaseModel):
+  doc_id: str
+
+@app.post("/extract")
+def extract(request: ExtractRequest):
+  # Check the document exists first: otherwise every search returns [] and we'd
+  # answer 200 with all fields None, as if the agreement stated nothing.
+  if not collection().get(where={"doc_id": request.doc_id}, limit=1, include=[])["ids"]:
+    raise HTTPException(status_code=404, detail="Unknown doc_id. Upload the PDF first.")
+
+  def search(query: str) -> list[dict]:
+    # A closure: it remembers request.doc_id, so extract_terms only has to pass a query.
+    return hybrid_search(collection(), request.doc_id, query, embed_texts, TOP_K_EXTRACT)
+
+  try:
+    result = extract_terms(search, complete_json)
+  except openai.OpenAIError:
+    raise HTTPException(status_code=502, detail="The language model service failed. Try again later.")
+  
+  terms = result["terms"]
+  return {
+    "doc_id": request.doc_id,
+    "found": terms.found_fields(),
+    "terms": terms.model_dump(),
+    "warnings": result["warnings"],
+    "risk_flags": [flag.model_dump() for flag in assess_risks(terms)],
+  }
