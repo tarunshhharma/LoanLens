@@ -1,0 +1,344 @@
+{
+  "run_at": "2026-11-17T14:43:15",
+  "config": {
+    "top_k": 5,
+    "embedding_model": "text-embedding-3-small",
+    "chat_model": "gpt-4.1-mini"
+  },
+  "summary": {
+    "retrieval_hit_rate": 0.941,
+    "citation_accuracy": 0.912,
+    "answer_accuracy": 0.882,
+    "not_found_accuracy": 0.833,
+    "overall_accuracy": 0.875,
+    "by_type": {
+      "clause": 0.923,
+      "plain": 1.0,
+      "schedule": 0.8,
+      "not_found": 0.833,
+      "definition": 1.0
+    }
+  },
+  "scores": [
+    {
+      "id": "P01",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P02",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P03",
+      "type": "plain",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P04",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": false,
+      "citation_hit": false,
+      "correct": false
+    },
+    {
+      "id": "P05",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P06",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P07",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": false
+    },
+    {
+      "id": "P08",
+      "type": "plain",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P09",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P10",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P11",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P12",
+      "type": "plain",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P13",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": false
+    },
+    {
+      "id": "P14",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "P15",
+      "type": "not_found",
+      "found": false,
+      "retrieval_hit": null,
+      "citation_hit": null,
+      "correct": true
+    },
+    {
+      "id": "P16",
+      "type": "not_found",
+      "found": false,
+      "retrieval_hit": null,
+      "citation_hit": null,
+      "correct": true
+    },
+    {
+      "id": "H01",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H02",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H03",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H04",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H05",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H06",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H07",
+      "type": "plain",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": false,
+      "correct": true
+    },
+    {
+      "id": "H08",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H09",
+      "type": "definition",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H10",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H11",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H12",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "H13",
+      "type": "not_found",
+      "found": false,
+      "retrieval_hit": null,
+      "citation_hit": null,
+      "correct": true
+    },
+    {
+      "id": "H14",
+      "type": "not_found",
+      "found": false,
+      "retrieval_hit": null,
+      "citation_hit": null,
+      "correct": false
+    },
+    {
+      "id": "R01",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "R02",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "R03",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "R04",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": false,
+      "citation_hit": false,
+      "correct": false
+    },
+    {
+      "id": "R05",
+      "type": "schedule",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "R06",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "R07",
+      "type": "clause",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "R08",
+      "type": "plain",
+      "found": true,
+      "retrieval_hit": true,
+      "citation_hit": true,
+      "correct": true
+    },
+    {
+      "id": "R09",
+      "type": "not_found",
+      "found": false,
+      "retrieval_hit": null,
+      "citation_hit": null,
+      "correct": true
+    },
+    {
+      "id": "R10",
+      "type": "not_found",
+      "found": false,
+      "retrieval_hit": null,
+      "citation_hit": null,
+      "correct": true
+    }
+  ]
+}
