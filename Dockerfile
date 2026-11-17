@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
 COPY ui/ ui/
+COPY deploy/ deploy/
 
 # Don't run as root. chroma_db/ is created here so the volume mounted on it belongs to this user.
 RUN useradd --create-home loanlens && mkdir chroma_db && chown loanlens chroma_db

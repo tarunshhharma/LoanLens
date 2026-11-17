@@ -3,6 +3,7 @@
 Start the API first, then, from the project root:
     python -m streamlit run ui/app.py
 """
+import hmac
 import os
 
 import httpx
@@ -12,6 +13,7 @@ from ui.display import term_rows
 
 API_URL = os.getenv("LOANLENS_API_URL", "http://127.0.0.1:8000")
 TIMEOUT = 180  # seconds: /upload embeds every chunk, /extract makes 3 model calls
+ACCESS_CODE = os.getenv("LOANLENS_ACCESS_CODE")  # set only on the public demo
 
 SEVERITY_BOX = {"high": st.error, "medium": st.warning, "low": st.info}
 
@@ -37,10 +39,24 @@ def call_api(path: str, **kwargs) -> dict | None:
 st.session_state.setdefault("document", None)
 st.session_state.setdefault("answers", [])
 st.session_state.setdefault("extraction", None)
+st.session_state.setdefault("unlocked", False)
 
 st.set_page_config(page_title="LoanLens", layout="wide")
 st.title("LoanLens")
 st.caption("Questions about your loan agreement, answered with the clause and page they come from.")
+
+# --- Access code (public demo only) ---------------------------------------------
+# Every upload and question costs OpenAI credit, so the public demo is for people given the code.
+if ACCESS_CODE and not st.session_state.unlocked:
+  code = st.text_input("Access code", type="password", help="Ask the author for the demo code.")
+  if not code:
+    st.stop()
+  # compare_digest takes the same time however many characters match, so timing reveals nothing
+  if not hmac.compare_digest(code.encode(), ACCESS_CODE.encode()):
+    st.error("Wrong access code.")
+    st.stop()
+  st.session_state.unlocked = True
+  st.rerun()  # draw the app without the code box
 
 # --- Sidebar: upload ----------------------------------------------------------
 with st.sidebar:

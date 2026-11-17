@@ -395,6 +395,24 @@ Format: what was decided, why, and what else was considered.
 - **Why also `docker build`:** a broken `Dockerfile` would otherwise be discovered only at deploy time.
 - **It found a bug before it was even pushed:** simulating CI in a clean clone showed an import-order error (I001) in `tests/test_evals.py` that the local `ruff check` had hidden because of a stale `.ruff_cache`. A clean machine has no cache, no `.env`, no `samples/` and no uncommitted files: that is the point.
 
+### 51. Deployed on Render as one free web service (`render.yaml`, `deploy/start.sh`)
+
+- **Decision:** one Render web service, built from the same `Dockerfile`, started with `sh deploy/start.sh`: uvicorn in the background on `127.0.0.1:8000`, Streamlit in the foreground on `0.0.0.0:$PORT` (Render sets `PORT`, default 10000).
+- **Why one service, not two:** only the UI is public, and the API can't be reached from outside the container (checked from a second container: port 8000 refused). Two services would make `/upload` public, and anyone could spend the OpenAI credit without going through the UI. One service also stays inside the free monthly hours.
+- **Why Render:** free tier, builds a Dockerfile straight from GitHub, and redeploys on push. Measured memory: 175 MB for both processes after an upload and a question, under the free tier's 512 MB. Hugging Face Spaces was the alternative; its free Docker tier was reportedly restricted in 2026.
+- **`exec` in the start script:** Streamlit becomes PID 1, so Render's stop signal reaches it directly instead of a shell.
+- **Health check:** `/_stcore/health` (Streamlit's), because Render can only reach the public port.
+- **`autoDeployTrigger: checksPass`:** Render deploys a commit only after GitHub Actions passes on it. CI is the gate for CD.
+- **Secrets:** `OPENAI_API_KEY` and `LOANLENS_ACCESS_CODE` are declared with `sync: false`, so Render asks for them in its dashboard; the values are never in the repo.
+- **`.gitattributes` (`*.sh text eol=lf`):** Git on Windows checks files out with CRLF; `sh` fails on a script whose lines end in `\r`.
+
+### 52. The public demo asks for an access code
+
+- **Decision:** if `LOANLENS_ACCESS_CODE` is set, the UI shows only a password box until the right code is entered; `st.stop()` ends the script run, so the uploader isn't even drawn. Unset (local, `docker compose`), there is no gate.
+- **Why:** every upload and question costs OpenAI credit. The code is given to recruiters and interviewers, not posted publicly.
+- **`hmac.compare_digest`, not `==`:** constant-time comparison, so response time doesn't reveal how much of a guess was right.
+- **Tested with Streamlit's `AppTest`** (`tests/test_ui_access.py`): typing into the box and checking what is drawn. The tests failed 6 of 7 against the UI without the gate.
+
 ---
 
 ## Known limitations
@@ -424,6 +442,9 @@ Format: what was decided, why, and what else was considered.
 | Results vary between runs | P07 passed once and failed once with identical code at `temperature=0` | Run evals several times and compare averages |
 | The injection scanner is English regex | Misspelled, translated or paraphrased instructions in visible text pass | A trained classifier; the other layers still apply |
 | The Docker image is 1.6 GB | `requirements.txt` is a full `pip freeze`, so `pytest`, `ruff` and every transitive package are installed in the image | Split into `requirements.txt` (runtime) and `requirements-dev.txt`; multi-stage build |
+| Uploads on the demo are temporary | Render's free tier has no persistent disk: a redeploy or restart empties `chroma_db/` | Paid instance with a disk, or a hosted vector database |
+| The demo sleeps when idle | Free Render services stop after ~15 minutes without traffic; the next visit waits ~1 minute | Paid instance |
+| The access code can be guessed repeatedly | No attempt limit on the password box | Limit attempts per session; OpenAI project budget cap as a backstop |
 | The visibility check ignores images | White text on a dark background image is dropped; dark text hidden behind an image is kept | Check image boxes as well as filled rectangles |
 | Names and addresses are not redacted | "Borrower: Ravi Kumar" stays in the text | Named-entity recognition, or mask the KFS identity fields |
 | The golden set is small and labelled by one person | 40 questions over 3 agreements | Grow it with every real failure; a second reviewer for the labels |
