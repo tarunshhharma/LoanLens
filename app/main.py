@@ -13,6 +13,7 @@ from app.extract import TOP_K_EXTRACT, extract_terms
 from app.llm import complete_json, embed_texts
 from app.retrieval import hybrid_search
 from app.risk import assess_risks
+from app.security import quarantine
 from app.splitting import (
   UNKNOWN,
   detect_numbering_style,
@@ -89,6 +90,8 @@ def upload_pdf(file: UploadFile):
   cleaned = clean_pages(page_texts)
   style = detect_numbering_style(cleaned)
   chunks = split_oversized(split_into_chunks(cleaned))
+  chunks, injection_warnings = quarantine(chunks)
+  warnings.extend(injection_warnings)
 
   if style == UNKNOWN:
     warnings.append("Could not detect clause numbering; the document was split by page instead.")
