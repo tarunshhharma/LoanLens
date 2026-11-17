@@ -23,6 +23,7 @@ from app.splitting import (
   split_oversized,
 )
 from app.store import add_document, get_collection
+from app.visibility import visible_text
 
 load_dotenv()  # puts OPENAI_API_KEY (and OPENAI_CHAT_MODEL, if set) from .env into os.environ
 
@@ -66,9 +67,13 @@ def upload_pdf(file: UploadFile):
   pages = []
   page_texts = []
   redactions = Counter()
+  hidden_pages = []
   with doc:
     for page in doc:
-      text, found = redact(page.get_text())
+      raw, hidden = visible_text(page)  # drop white/tiny text a reader can't see
+      if hidden:
+        hidden_pages.append(page.number + 1)
+      text, found = redact(raw)
       redactions.update(found)
       page_texts.append(text)
       char_count = len(text.strip())
@@ -89,6 +94,9 @@ def upload_pdf(file: UploadFile):
 
   if empty_pages:
     warnings.append(f"Pages {empty_pages} have no extractable text (possibly scanned).")
+  if hidden_pages:
+    warnings.append(f"Ignored invisible text (white or tiny font) on pages {hidden_pages}; "
+                    "it was not indexed.")
 
   # 4. Clean, split into clauses, then break oversized chunks into parts
   cleaned = clean_pages(page_texts)
