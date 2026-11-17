@@ -1,0 +1,10 @@
+# Never send secrets, local data or the venv into the image
+.env
+venv/
+chroma_db/
+samples/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/

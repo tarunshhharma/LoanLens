@@ -275,7 +275,7 @@ Format: what was decided, why, and what else was considered.
 ### 36. Endpoint tests call the function directly, with `monkeypatch`
 
 - **Decision:** `/extract` tests call `main.extract(...)` and use `monkeypatch.setattr(main, ...)` to swap in a fake model, a fake embedder and a Chroma in a temp folder.
-- **Why:** at the time, `TestClient` seemed to need `httpx2`. This still covers the endpoint's logic (404, 502, response shape, risk flags) and never touches the real `chroma_db/`. HTTP-level tests were added on Day 5 (decision 45).
+- **Why:** at the time `TestClient` seemed to need a new package (`httpx2`); it turned out to be installed already. This still covers the endpoint's logic (404, 502, response shape, risk flags) and never touches the real `chroma_db/`. HTTP-level tests were added on Day 5 (decision 45).
 - **Why it works:** `extract()` looks up `complete_json` and `embed_texts` in `main`'s globals when it runs, so replacing them in `main` changes what it calls.
 
 ---
@@ -360,12 +360,32 @@ Format: what was decided, why, and what else was considered.
 
 - **Decision:** 21 tests send real HTTP requests to the app in memory through FastAPI's `TestClient`, with the same fakes as before (temp Chroma, fake embedder, fake model via `monkeypatch`).
 - **Why:** calling `upload_pdf()` directly skips multipart parsing, JSON body parsing, Pydantic's automatic 422s, routing (404, 405) and the status code a client actually receives. These tests cover all of them, including 413 over 20 MB and which field a 422 names (`detail[0]["loc"]`).
-- **No `httpx2`:** Starlette asks for `httpx2` but falls back to the installed `httpx`. An unverified package was not installed when the one already pinned works.
+- **No new dependency:** `TestClient` uses `httpx2`, which was already installed and pinned as a dependency of `openai` (`pip show httpx2` → "Required-by: huggingface_hub, openai").
 
 ### 46. A `/health` endpoint that does nothing
 
 - **Decision:** `GET /health` returns `{"status": "ok"}` and touches neither Chroma nor OpenAI.
 - **Why:** Docker and the hosting platform call it every few seconds. Calling OpenAI there would cost money on every check and mark the app "down" whenever OpenAI is slow, even though the app is fine. A test pins it down by removing `OPENAI_API_KEY`.
+
+### 47. One Docker image, two Compose services
+
+- **Decision:** one `Dockerfile` (`python:3.13-slim`) builds an image that runs uvicorn by default; `docker-compose.yml` runs it twice: `api` on 8000 and `ui` on 8501 with a different `command`.
+- **Why one image:** one build and one set of pinned dependencies; the API and UI can't drift apart.
+- **Layer order:** `requirements.txt` is installed before the code is copied, so a code change rebuilds in seconds instead of re-running `pip install`.
+- **The UI finds the API by service name:** `LOANLENS_API_URL=http://api:8000`. Each container has its own `127.0.0.1`.
+- **`--host 0.0.0.0`:** `127.0.0.1` inside a container would only accept connections from that container, so the port mapping would reach nothing.
+- **The UI waits for a healthy API:** `depends_on: condition: service_healthy`, using `/health` (decision 46) through `python -c urllib...`, because the slim image has no `curl`.
+
+### 48. The API key is given at run time, never baked into the image
+
+- **Decision:** `.dockerignore` excludes `.env`; Compose passes it with `env_file: .env` when the container starts.
+- **Why:** anything in an image (an `ENV` line, a copied `.env`) can be read by anyone who has the image, and stays in its layers even if a later step deletes it. Checked: `test -f /app/.env` inside the image → absent.
+- **Also excluded:** `venv/` (Windows binaries, useless on Linux), `chroma_db/`, `samples/`, `.git/`.
+
+### 49. Chroma data lives in a named volume; the app runs as a non-root user
+
+- **Volume:** `chroma_data` is mounted at `/app/chroma_db` (`store.DB_PATH`). A container's own filesystem is discarded when it is removed; the volume survives `docker compose down` (only `down -v` deletes it). Checked: a document uploaded before `down` and `up` was still answerable after.
+- **Non-root:** the app runs as user `loanlens`, so a compromised process isn't root in the container. `chroma_db/` is created and given to that user before the volume is mounted, so the new volume gets that ownership and Chroma can write to it.
 
 ---
 
@@ -395,6 +415,7 @@ Format: what was decided, why, and what else was considered.
 | A "not mentioned" answer can pass as found | H14: "The agreement does not mention any cashback" returned with 5 citations | Prompt: never answer that something is not mentioned, return null; or detect it in `parse_reply` |
 | Results vary between runs | P07 passed once and failed once with identical code at `temperature=0` | Run evals several times and compare averages |
 | The injection scanner is English regex | Misspelled, translated or paraphrased instructions in visible text pass | A trained classifier; the other layers still apply |
+| The Docker image is 1.6 GB | `requirements.txt` is a full `pip freeze`, so `pytest`, `ruff` and every transitive package are installed in the image | Split into `requirements.txt` (runtime) and `requirements-dev.txt`; multi-stage build |
 | The visibility check ignores images | White text on a dark background image is dropped; dark text hidden behind an image is kept | Check image boxes as well as filled rectangles |
 | Names and addresses are not redacted | "Borrower: Ravi Kumar" stays in the text | Named-entity recognition, or mask the KFS identity fields |
 | The golden set is small and labelled by one person | 40 questions over 3 agreements | Grow it with every real failure; a second reviewer for the labels |
