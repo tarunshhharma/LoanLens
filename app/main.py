@@ -1,4 +1,5 @@
 import hashlib
+from collections import Counter
 from functools import lru_cache
 
 import openai
@@ -11,6 +12,7 @@ from app.answer import answer_question
 from app.cleaning import clean_pages
 from app.extract import TOP_K_EXTRACT, extract_terms
 from app.llm import complete_json, embed_texts
+from app.redact import redact
 from app.retrieval import hybrid_search
 from app.risk import assess_risks
 from app.security import quarantine
@@ -63,9 +65,11 @@ def upload_pdf(file: UploadFile):
   # 3. Extract text page by page, keeping track of page numbers
   pages = []
   page_texts = []
+  redactions = Counter()
   with doc:
     for page in doc:
-      text = page.get_text()
+      text, found = redact(page.get_text())
+      redactions.update(found)
       page_texts.append(text)
       char_count = len(text.strip())
       pages.append({
@@ -109,6 +113,7 @@ def upload_pdf(file: UploadFile):
     "total_pages": len(pages),
     "pages": pages,
     "warnings": warnings,
+    "redactions": dict(redactions),
     "numbering_style": style,
     "chunk_count": len(chunks),
     "chunks": [
