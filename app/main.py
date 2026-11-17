@@ -44,6 +44,12 @@ def collection():
   return get_collection()
 
 
+@app.get("/health")
+def health():
+  # For Docker and the hosting platform: "is the app up?" Must stay cheap and never call OpenAI.
+  return {"status": "ok"}
+
+
 @app.post("/upload")
 def upload_pdf(file: UploadFile):
   pdf_bytes = file.file.read()

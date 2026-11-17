@@ -275,7 +275,7 @@ Format: what was decided, why, and what else was considered.
 ### 36. Endpoint tests call the function directly, with `monkeypatch`
 
 - **Decision:** `/extract` tests call `main.extract(...)` and use `monkeypatch.setattr(main, ...)` to swap in a fake model, a fake embedder and a Chroma in a temp folder.
-- **Why:** `TestClient` needs `httpx2`, not installed yet. This still covers the endpoint's logic (404, 502, response shape, risk flags) and never touches the real `chroma_db/`.
+- **Why:** at the time, `TestClient` seemed to need `httpx2`. This still covers the endpoint's logic (404, 502, response shape, risk flags) and never touches the real `chroma_db/`. HTTP-level tests were added on Day 5 (decision 45).
 - **Why it works:** `extract()` looks up `complete_json` and `embed_texts` in `main`'s globals when it runs, so replacing them in `main` changes what it calls.
 
 ---
@@ -354,6 +354,21 @@ Format: what was decided, why, and what else was considered.
 
 ---
 
+## Shipping (Day 5)
+
+### 45. Endpoint tests over HTTP with `TestClient` (`tests/test_api.py`)
+
+- **Decision:** 21 tests send real HTTP requests to the app in memory through FastAPI's `TestClient`, with the same fakes as before (temp Chroma, fake embedder, fake model via `monkeypatch`).
+- **Why:** calling `upload_pdf()` directly skips multipart parsing, JSON body parsing, Pydantic's automatic 422s, routing (404, 405) and the status code a client actually receives. These tests cover all of them, including 413 over 20 MB and which field a 422 names (`detail[0]["loc"]`).
+- **No `httpx2`:** Starlette asks for `httpx2` but falls back to the installed `httpx`. An unverified package was not installed when the one already pinned works.
+
+### 46. A `/health` endpoint that does nothing
+
+- **Decision:** `GET /health` returns `{"status": "ok"}` and touches neither Chroma nor OpenAI.
+- **Why:** Docker and the hosting platform call it every few seconds. Calling OpenAI there would cost money on every check and mark the app "down" whenever OpenAI is slow, even though the app is fine. A test pins it down by removing `OPENAI_API_KEY`.
+
+---
+
 ## Known limitations
 
 | Limitation | Example | Possible fix |
@@ -370,7 +385,6 @@ Format: what was decided, why, and what else was considered.
 | BM25 is rebuilt on every question | Fine for one agreement; slow for very large documents or many concurrent users | Cache the index per `doc_id` |
 | Agreement text is sent to OpenAI | Not acceptable for banks requiring on-premise processing | Local embedding and chat models |
 | Chroma runs inside the API process | Several uvicorn workers would each open the same files | Run Chroma as a separate server |
-| `/upload` and `/ask` have no endpoint tests | Bugs in `main.py` aren't caught by pytest (`/extract` has them, via `monkeypatch`) | `TestClient` tests (Day 5; needs `httpx2`) |
 | The model sometimes cites a source that doesn't exist | AU home `penal_charges` was found in one run and dropped ("cited no valid source") in the next | Retry once with the validation error in the prompt (planned "go deeper") |
 | Extraction varies between runs | Same agreement, different fields found, even at `temperature=0` | Retry on failure; measure with an eval set (Day 4) |
 | Only ten terms, five rules | No insurance, collateral or guarantor terms; no cross-default rule | Add fields and rules as needed; each rule is one function |
