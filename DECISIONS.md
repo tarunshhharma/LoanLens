@@ -387,6 +387,14 @@ Format: what was decided, why, and what else was considered.
 - **Volume:** `chroma_data` is mounted at `/app/chroma_db` (`store.DB_PATH`). A container's own filesystem is discarded when it is removed; the volume survives `docker compose down` (only `down -v` deletes it). Checked: a document uploaded before `down` and `up` was still answerable after.
 - **Non-root:** the app runs as user `loanlens`, so a compromised process isn't root in the container. `chroma_db/` is created and given to that user before the volume is mounted, so the new volume gets that ownership and Chroma can write to it.
 
+### 50. CI on GitHub Actions, with no secrets (`.github/workflows/ci.yml`)
+
+- **Decision:** on every push and pull request, a fresh Ubuntu runner installs `requirements.txt`, then runs `ruff check .`, `pytest`, `python -m scripts.run_attacks --offline` and `docker build`.
+- **No API key in CI:** every test injects a fake model, embedder and Chroma, and the offline attack suite only runs upload cases (the 8 ask/extract cases are skipped). CI is free, deterministic and safe to run on pull requests from forks. The tests that need `samples/` skip themselves (2 skipped).
+- **Least privilege:** `permissions: contents: read`; nothing in the job can push or publish.
+- **Why also `docker build`:** a broken `Dockerfile` would otherwise be discovered only at deploy time.
+- **It found a bug before it was even pushed:** simulating CI in a clean clone showed an import-order error (I001) in `tests/test_evals.py` that the local `ruff check` had hidden because of a stale `.ruff_cache`. A clean machine has no cache, no `.env`, no `samples/` and no uncommitted files: that is the point.
+
 ---
 
 ## Known limitations

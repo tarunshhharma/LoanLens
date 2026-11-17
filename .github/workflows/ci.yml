@@ -1,0 +1,44 @@
+# Runs on every push and pull request: lint, unit tests and the offline attack suite.
+# Needs no secrets: the tests use a fake model, embedder and database, so CI costs nothing.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Read-only access to the repo is all this job needs
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run still going for the old one
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip  # reuse downloaded packages until requirements.txt changes
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Attack suite (upload cases, no model)
+        run: python -m scripts.run_attacks --offline
+
+      - name: Docker image builds
+        run: docker build -t loanlens .
