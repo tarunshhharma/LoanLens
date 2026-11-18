@@ -95,7 +95,8 @@ ask_tab, terms_tab = st.tabs(["Ask a question", "Key terms & risks"])
 
 # --- Tab 1: questions -----------------------------------------------------------
 with ask_tab:
-  with st.form("ask", clear_on_submit=True):
+  # The box keeps the question after Ask, so it can be read, tweaked and asked again
+  with st.form("ask"):
     question = st.text_input("Your question", placeholder="What happens if I pay my EMI late?")
     asked = st.form_submit_button("Ask")
   if asked and question.strip():
