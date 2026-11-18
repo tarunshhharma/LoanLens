@@ -14,6 +14,7 @@ from ui.display import term_rows
 API_URL = os.getenv("LOANLENS_API_URL", "http://127.0.0.1:8000")
 TIMEOUT = 180  # seconds: /upload embeds every chunk, /extract makes 3 model calls
 ACCESS_CODE = os.getenv("LOANLENS_ACCESS_CODE")  # set only on the public demo
+MAX_UPLOAD_MB = 20  # same as MAX_FILE_SIZE in app/main.py; Streamlit's own default is 200
 
 SEVERITY_BOX = {"high": st.error, "medium": st.warning, "low": st.info}
 
@@ -63,7 +64,7 @@ if ACCESS_CODE and not st.session_state.unlocked:
 # --- Sidebar: upload ----------------------------------------------------------
 with st.sidebar:
   st.header("Agreement")
-  pdf = st.file_uploader("Loan agreement (PDF)", type="pdf")
+  pdf = st.file_uploader("Loan agreement (PDF)", type="pdf", max_upload_size=MAX_UPLOAD_MB)
   if pdf is not None and st.button("Upload and index", type="primary"):
     with st.spinner("Reading, splitting and embedding..."):
       result = call_api("/upload", files={"file": (pdf.name, pdf.getvalue(), "application/pdf")})

@@ -88,3 +88,13 @@ def test_link_code_is_ignored_when_there_is_no_gate(monkeypatch):
   at = start(monkeypatch, link_code="anything")
   assert len(at.text_input) == 0
   assert shows_app(at)
+
+
+# --- Upload limit ------------------------------------------------------------------
+
+def test_uploader_limit_matches_the_api_limit(monkeypatch):
+  # Streamlit's default is 200 MB; the API rejects over 20 MB (413). The UI must say the same.
+  from app.main import MAX_FILE_SIZE
+  at = start(monkeypatch)
+  uploader = at.sidebar.get("file_uploader")[0]
+  assert uploader.proto.max_upload_size_mb * 1024 * 1024 == MAX_FILE_SIZE

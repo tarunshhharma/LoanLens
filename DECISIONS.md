@@ -20,6 +20,8 @@ Format: what was decided, why, and what else was considered.
 
 ### 3. Validate size before parsing (20 MB limit, 413)
 
+- **The UI states the same limit** (added Day 5): Streamlit's uploader defaults to "200MB per file", so a 50 MB PDF was accepted, sent, and then rejected with 413. `max_upload_size=20` makes the browser refuse it before sending; the API check stays, because a client-side check can be bypassed. `test_uploader_limit_matches_the_api_limit` keeps the two in sync.
+
 - **Why:** Cheap checks run before expensive ones. MuPDF is a C library, so huge or malformed input can exhaust memory or crash the parser. Size and type checks keep untrusted input away from it.
 
 ### 4. Status codes: 400 vs 413 vs 422 vs 404 vs 502
