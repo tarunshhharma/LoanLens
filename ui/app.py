@@ -48,7 +48,9 @@ st.caption("Questions about your loan agreement, answered with the clause and pa
 # --- Access code (public demo only) ---------------------------------------------
 # Every upload and question costs OpenAI credit, so the public demo is for people given the code.
 if ACCESS_CODE and not st.session_state.unlocked:
-  code = st.text_input("Access code", type="password", help="Ask the author for the demo code.")
+  typed = st.text_input("Access code", type="password", help="Ask the author for the demo code.")
+  # A shared link can carry the code (…/?code=...), so it opens with one click
+  code = typed or st.query_params.get("code", "")
   if not code:
     st.stop()
   # compare_digest takes the same time however many characters match, so timing reveals nothing

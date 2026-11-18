@@ -412,6 +412,7 @@ Format: what was decided, why, and what else was considered.
 - **Why:** every upload and question costs OpenAI credit. The code is given to recruiters and interviewers, not posted publicly.
 - **`hmac.compare_digest`, not `==`:** constant-time comparison, so response time doesn't reveal how much of a guess was right.
 - **Tested with Streamlit's `AppTest`** (`tests/test_ui_access.py`): typing into the box and checking what is drawn. The tests failed 6 of 7 against the UI without the gate.
+- **The code can travel in the link:** `…/?code=<code>` unlocks with one click, so a recruiter doesn't have to type anything. A wrong code in the link shows the error and leaves the box to type in. Trade-off: the code is visible in the address bar and browser history, and anyone the link is forwarded to gets in; acceptable for a demo whose worst case is a few dollars of credit.
 
 ---
 

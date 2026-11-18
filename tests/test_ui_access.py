@@ -16,12 +16,15 @@ SCRIPT = str(Path(__file__).resolve().parent.parent / "ui" / "app.py")
 WELCOME = "Upload a loan agreement in the sidebar to begin."
 
 
-def start(monkeypatch, code=None):
+def start(monkeypatch, code=None, link_code=None):
   if code is None:
     monkeypatch.delenv("LOANLENS_ACCESS_CODE", raising=False)
   else:
     monkeypatch.setenv("LOANLENS_ACCESS_CODE", code)
-  return AppTest.from_file(SCRIPT, default_timeout=30).run()
+  at = AppTest.from_file(SCRIPT, default_timeout=30)
+  if link_code is not None:
+    at.query_params["code"] = link_code  # as if opened from …/?code=<link_code>
+  return at.run()
 
 
 def shows_app(at) -> bool:
@@ -61,4 +64,27 @@ def test_right_code_unlocks_the_app(monkeypatch):
   at.text_input[0].input("letmein").run()
   assert at.session_state.unlocked
   assert len(at.text_input) == 0  # the code box is gone
+  assert shows_app(at)
+
+
+# --- The code in the link (…/?code=...) ---------------------------------------------
+
+def test_right_code_in_the_link_unlocks_the_app(monkeypatch):
+  at = start(monkeypatch, code="letmein", link_code="letmein")
+  assert at.session_state.unlocked
+  assert len(at.text_input) == 0
+  assert shows_app(at)
+
+
+def test_wrong_code_in_the_link_is_rejected_and_the_box_stays(monkeypatch):
+  at = start(monkeypatch, code="letmein", link_code="guess")
+  assert at.error[0].value == "Wrong access code."
+  assert not shows_app(at)
+  at.text_input[0].input("letmein").run()  # the visitor can still type the right one
+  assert shows_app(at)
+
+
+def test_link_code_is_ignored_when_there_is_no_gate(monkeypatch):
+  at = start(monkeypatch, link_code="anything")
+  assert len(at.text_input) == 0
   assert shows_app(at)
